@@ -409,7 +409,9 @@ FFuaUICommands* FapUAMainWindow::getCommands()
   this->mechHeader.push_back(FFuaCmdItem::getCmdItem("cmdId_createStrainRosette"));
 
   this->mechHeader.push_back(&this->separator);
+
   this->mechHeader.push_back(FFuaCmdItem::getCmdItem("cmdId_function_GeneralFunction"));
+  this->mechHeader.push_back(FFuaCmdItem::getCmdItem("cmdId_function_ImportSinusoidsFromFile"));
   this->mechHeader.push_back(FFuaCmdItem::getCmdItem("cmdId_function_DriveFile"));
 
 #ifdef FT_HAS_EXTCTRL

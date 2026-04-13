@@ -16,6 +16,15 @@
 #include "vpmDB/FmSpringChar.H"
 #include "vpmUI/Icons/FuiIconPixmaps.H"
 #include "FFuLib/FFuAuxClasses/FFuaCmdItem.H"
+#include <cmath>
+#include <fstream>
+#include <sstream>
+#include <iomanip >
+#include "vpmDB/FmDB.H"
+#include "vpmDB/FmMechanism.H"
+#include "FFuLib/FFuFileDialog.H"
+#include "FFaLib/FFaOS/FFaFilePath.H"
+#include "FFaLib/FFaDefinitions/FFaMsg.H"
 
 
 namespace {
@@ -23,7 +32,105 @@ void createSpringChar(FmSpringChar::SpringCharUse useType);
 void createFunc(FmMathFuncBase::FuncUse useType, bool defaultSine = false);
 void convertFunc(FmMathFuncBase::FuncUse use);
 void convertToEngine(FmMathFuncBase::FuncUse use);
+
+// New: load sinusoidal definitions from file
+void loadSinusoidsFromFile()
+{
+#ifdef FAP_DEBUG
+  std::cout << "FapFunctionCmds::loadSinusoidsFromFile()" << std::endl;
+#endif
+
+  // Default directory: model path
+  const std::string& absModelPath = FmDB::getMechanismObject()->getAbsModelFilePath();
+  FFuFileDialog* dlg = FFuFileDialog::create(absModelPath, "Load Sinusoids", FFuFileDialog::FFU_OPEN_FILE, true);
+  dlg->setTitle("Select sinusoidal definitions file");
+  dlg->addFilter("Text file", Strings{ "txt", "asc", "csv" });
+  dlg->addAllFilesFilter(true);
+
+  //if (!dlg->runModal()) {
+  //  delete dlg;
+  //  return; // user cancelled
+  //}
+
+  std::vector<std::string> retFiles = dlg->execute();
+  if (retFiles.empty()) return;
+  std::string fileName = retFiles.front();
+  delete dlg;
+  if (fileName.empty()) return;
+
+  // Make absolute if relative
+  FFaFilePath::makeItAbsolute(fileName, absModelPath);
+
+  std::ifstream ifs1("Sinusoidals.txt",std::ios::in);
+  std::ifstream ifs(fileName.c_str(),std::ios::in);
+  if (!ifs) {
+    ListUI << "Could not open sinusoidal definitions file: " << fileName << "\n";
+    return;
+  }
+
+  std::vector<FmfSinusoidal*> created;
+  std::string line;
+  int lineNo = 0;
+
+	const double dPi = 4.0 * std::atan(1.0);
+
+  while (std::getline(ifs, line)) {
+    ++lineNo;
+    // Trim leading spaces
+    std::string tmp = line;
+    size_t p = tmp.find_first_not_of(" \t\r\n");
+    if (p == std::string::npos) continue; // empty
+    if (tmp[p] == '#') continue; // comment
+
+    std::istringstream iss(tmp);
+    double omega = 0.0, periodDelay = 0.0, amplitude = 0.0, ampDisp = 0.0, maxTime = 0.0;
+    std::string UITag("Un-initialized tag name");
+
+    // Expect up to 6 values; require at least frequency and amplitude (or choose to require 3)
+    if (!(iss >> std::quoted(UITag) >> omega >> periodDelay >> amplitude)) {
+      ListUI << "Skipping line " << lineNo << ", insufficient values:" << tmp <<"\n";
+      continue;
+    }
+
+    // optional values
+    iss >> ampDisp >> maxTime;
+
+    // Create function
+    FmfSinusoidal* f = new FmfSinusoidal();
+		f->setTag(UITag.c_str());
+		f->setUserDescription(UITag.c_str());
+		double freq = omega / (2.0 * dPi);
+    f->setFrequency(freq);
+    f->setPeriodDelay(periodDelay);
+    f->setAmplitude(amplitude);
+    f->setAmplitudeDisplacement(ampDisp);
+    f->setMaxTime(maxTime);
+
+    // Add to DB: keep as a plain function (unused) so user can assign later
+    f->setFunctionUse(FmMathFuncBase::GENERAL);
+    f->setParentAssembly(FapDBCreateCmds::getSelectedAssembly());
+    f->connect();
+
+    created.push_back(f);
+
+    FmEngine* e = new FmEngine();
+    e->setUserDescription(f->getUserDescription());
+    e->setFunction(f);
+    e->setParentAssembly(f->getParentAssembly());
+    e->connect();
+  }
+
+  if (!created.empty()) {
+    // Select the last created function (or choose another selection policy)
+    FapEventManager::permTotalSelect(created.back());
+    ListUI << "Imported " << created.size() << " sinusoidal definition(s) from " << fileName << "\n";
+  } else {
+    ListUI << "No sinusoidal definitions imported from " << fileName << "\n";
+  }
 }
+
+} // anonymous namespace
+
 
 #define LAMBDA_CREATE_SPRCHAR(USE) FFaDynCB0S([](){ createSpringChar(FmSpringChar::USE); })
 #define LAMBDA_CREATE_FUNCTION(USE) FFaDynCB0S([](){ createFunc(FmMathFuncBase::USE); })
@@ -104,6 +211,14 @@ void FapFunctionCmds::init()
   i->setText("Function");
   i->setSmallIcon(function_xpm);
   i->setActivatedCB(FFaDynCB0S(FapFunctionCmds::createGeneralFunction));
+  i->setGetSensitivityCB(FFaDynCB1S(FapCmdsBase::isModelEditable,bool&));
+
+  // New menu entry: "Sinusoidal definitions from File"
+  i = new FFuaCmdItem("cmdId_function_ImportSinusoidsFromFile");
+  i->setText("Sinusoidal definitions from File");
+  //bh i->setSmallIcon(sinus); // reuse sinus icon if visible in this translation unit
+  i->setSmallIcon(function_xpm); // reuse sinus icon if visible in this translation unit
+  i->setActivatedCB(FFaDynCB0S(loadSinusoidsFromFile));
   i->setGetSensitivityCB(FFaDynCB1S(FapCmdsBase::isModelEditable,bool&));
 
   i = new FFuaCmdItem("cmdId_function_DriveFile");
